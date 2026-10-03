@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "my-realtime-server",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-03",
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CLOUD_DATA",
+        "class_name": "CloudData"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CloudData"
+      ]
+    }
+  ]
+}
