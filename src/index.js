@@ -1,5 +1,26 @@
 import { DurableObject } from "cloudflare:workers";
 
+const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+};
+
+function cors(response) {
+    const headers = new Headers(response.headers);
+
+    for (const [key, value] of Object.entries(CORS_HEADERS)) {
+        headers.set(key, value);
+    }
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+    });
+}
+
+
 export class CloudData extends DurableObject {
 
     async send(value, index) {
@@ -29,11 +50,21 @@ export class CloudData extends DurableObject {
     }
 }
 
+
 export default {
 
     async fetch(request, env) {
 
         const url = new URL(request.url);
+
+        // CORSプリフライト
+        if (request.method === "OPTIONS") {
+            return new Response(null, {
+                status: 204,
+                headers: CORS_HEADERS
+            });
+        }
+
 
         // 書き込み
         if (request.method === "POST" && url.pathname === "/send") {
@@ -44,13 +75,16 @@ export default {
 
             const object = env.CLOUD_DATA.getByName(link);
 
-            return Response.json(
-                await object.send(
-                    body.value,
-                    Number(body.index)
+            return cors(
+                Response.json(
+                    await object.send(
+                        body.value,
+                        Number(body.index)
+                    )
                 )
             );
         }
+
 
         // 取得
         if (request.method === "GET" && url.pathname === "/get") {
@@ -61,10 +95,13 @@ export default {
 
             const object = env.CLOUD_DATA.getByName(link);
 
-            return Response.json(
-                await object.get()
+            return cors(
+                Response.json(
+                    await object.get()
+                )
             );
         }
+
 
         // 削除
         if (request.method === "DELETE" && url.pathname === "/delete") {
@@ -75,11 +112,16 @@ export default {
 
             const object = env.CLOUD_DATA.getByName(link);
 
-            return Response.json(
-                await object.delete()
+            return cors(
+                Response.json(
+                    await object.delete()
+                )
             );
         }
 
-        return new Response("Cloud Server OK");
+
+        return cors(
+            new Response("Cloud Server OK")
+        );
     }
 };
