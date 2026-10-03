@@ -20,13 +20,8 @@ function cors(response) {
     });
 }
 
+
 export class CloudData extends DurableObject {
-
-    constructor(ctx, env) {
-        super(ctx, env);
-
-        this.sessions = new Set();
-    }
 
     async send(value, index) {
 
@@ -40,25 +35,9 @@ export class CloudData extends DurableObject {
 
         await this.ctx.storage.put("data", data);
 
-        // 更新されたことを接続中のクライアントへ通知
-        const message = JSON.stringify({
-            type: "update",
-            value: value,
-            index: index,
-            data: data
-        });
-
-        for (const websocket of this.sessions) {
-
-            try {
-                websocket.send(message);
-            } catch {
-                this.sessions.delete(websocket);
-            }
-        }
-
         return data;
     }
+
 
     async get() {
 
@@ -71,75 +50,26 @@ export class CloudData extends DurableObject {
         return data;
     }
 
+
     async delete() {
 
         await this.ctx.storage.delete("data");
 
-        const message = JSON.stringify({
-            type: "delete",
-            data: {}
-        });
-
-        for (const websocket of this.sessions) {
-
-            try {
-                websocket.send(message);
-            } catch {
-                this.sessions.delete(websocket);
-            }
-        }
-
         return {};
     }
-
-    async fetch(request) {
-
-        // WebSocket接続
-        if (
-            request.method === "GET" &&
-            request.headers.get("Upgrade") === "websocket"
-        ) {
-
-            const pair = new WebSocketPair();
-
-            const client = pair[0];
-            const server = pair[1];
-
-            server.accept();
-
-            this.sessions.add(server);
-
-            server.addEventListener("close", () => {
-                this.sessions.delete(server);
-            });
-
-            server.addEventListener("error", () => {
-                this.sessions.delete(server);
-            });
-
-            // 現在のデータを最初に送信
-            const data = await this.get();
-
-            server.send(JSON.stringify({
-                type: "connected",
-                data: data
-            }));
-
-            return new Response(null, {
-                status: 101,
-                webSocket: client
-            });
-        }
-
-        return new Response("Cloud Data");
-    }
 }
+
 
 export default {
 
     async fetch(request, env) {
 
         const url = new URL(request.url);
+
+
+        /*
+         * CORS
+         */
 
         if (request.method === "OPTIONS") {
 
@@ -150,8 +80,9 @@ export default {
 
         }
 
+
         /*
-         * データ送信
+         * 送信
          */
 
         if (
@@ -176,8 +107,9 @@ export default {
             );
         }
 
+
         /*
-         * データ取得
+         * 取得
          */
 
         if (
@@ -186,7 +118,9 @@ export default {
         ) {
 
             const link =
-                String(url.searchParams.get("link"));
+                String(
+                    url.searchParams.get("link")
+                );
 
             const object =
                 env.CLOUD_DATA.getByName(link);
@@ -198,8 +132,9 @@ export default {
             );
         }
 
+
         /*
-         * データ削除
+         * 削除
          */
 
         if (
@@ -208,7 +143,9 @@ export default {
         ) {
 
             const link =
-                String(url.searchParams.get("link"));
+                String(
+                    url.searchParams.get("link")
+                );
 
             const object =
                 env.CLOUD_DATA.getByName(link);
@@ -220,10 +157,9 @@ export default {
             );
         }
 
+
         /*
-         * WebSocket
-         *
-         * /watch?link=アドレス
+         * WebSocket監視
          */
 
         if (
@@ -232,26 +168,32 @@ export default {
         ) {
 
             if (
-                request.headers.get("Upgrade") !== "websocket"
+                request.headers.get("Upgrade")
+                !== "websocket"
             ) {
 
                 return cors(
                     new Response(
                         "WebSocket Required",
-                        { status: 426 }
+                        {
+                            status: 426
+                        }
                     )
                 );
-
             }
 
+
             const link =
-                String(url.searchParams.get("link"));
+                String(
+                    url.searchParams.get("link")
+                );
 
             const object =
                 env.CLOUD_DATA.getByName(link);
 
             return object.fetch(request);
         }
+
 
         return cors(
             new Response("Cloud Server OK")
