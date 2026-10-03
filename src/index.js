@@ -37,6 +37,7 @@ export class CloudData extends DurableObject {
         return data;
     }
 
+
     async get() {
 
         const data = await this.ctx.storage.get("data");
@@ -48,6 +49,23 @@ export class CloudData extends DurableObject {
         return data;
     }
 
+
+    async clear(index) {
+
+        let data = await this.ctx.storage.get("data");
+
+        if (!data || typeof data !== "object") {
+            return {};
+        }
+
+        delete data[index];
+
+        await this.ctx.storage.put("data", data);
+
+        return data;
+    }
+
+
     async delete() {
 
         await this.ctx.storage.delete("data");
@@ -56,11 +74,13 @@ export class CloudData extends DurableObject {
     }
 }
 
+
 export default {
 
     async fetch(request, env) {
 
         const url = new URL(request.url);
+
 
         if (request.method === "OPTIONS") {
 
@@ -71,6 +91,8 @@ export default {
 
         }
 
+
+        // データ送信
         if (
             request.method === "POST" &&
             url.pathname === "/send"
@@ -93,6 +115,8 @@ export default {
             );
         }
 
+
+        // データ取得
         if (
             request.method === "GET" &&
             url.pathname === "/get"
@@ -111,6 +135,29 @@ export default {
             );
         }
 
+
+        // 特定の値を削除
+        if (
+            request.method === "POST" &&
+            url.pathname === "/clear"
+        ) {
+
+            const body = await request.json();
+
+            const link = String(body.link);
+
+            const object =
+                env.CLOUD_DATA.getByName(link);
+
+            return cors(
+                Response.json(
+                    await object.clear(body.index)
+                )
+            );
+        }
+
+
+        // サーバー全体を削除
         if (
             request.method === "DELETE" &&
             url.pathname === "/delete"
@@ -128,6 +175,7 @@ export default {
                 )
             );
         }
+
 
         return cors(
             new Response("Cloud Server OK")
