@@ -6,6 +6,8 @@ const CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Content-Type"
 };
 
+const ONLINE_TIME = 5000;
+
 function cors(response) {
     const headers = new Headers(response.headers);
 
@@ -24,43 +26,134 @@ export class CloudData extends DurableObject {
 
     async send(value, index) {
 
-        let data = await this.ctx.storage.get("data");
+        let data =
+            await this.ctx.storage.get("data");
 
         if (!data || typeof data !== "object") {
             data = {};
         }
 
-        data[index] = value;
+        data[index] = {
+            value: value,
+            updatedAt: Date.now()
+        };
 
-        await this.ctx.storage.put("data", data);
+        await this.ctx.storage.put(
+            "data",
+            data
+        );
 
-        return data;
+        return value;
     }
 
 
-    async get() {
+    async get(index) {
 
-        const data = await this.ctx.storage.get("data");
+        const data =
+            await this.ctx.storage.get("data");
 
-        if (!data || typeof data !== "object") {
+        if (
+            !data ||
+            typeof data !== "object"
+        ) {
+            return null;
+        }
+
+        const item = data[index];
+
+        if (!item) {
+            return null;
+        }
+
+        if (
+            Date.now() - item.updatedAt >
+            ONLINE_TIME
+        ) {
+            delete data[index];
+
+            await this.ctx.storage.put(
+                "data",
+                data
+            );
+
+            return null;
+        }
+
+        return item.value;
+    }
+
+
+    async getAll() {
+
+        let data =
+            await this.ctx.storage.get("data");
+
+        if (
+            !data ||
+            typeof data !== "object"
+        ) {
             return {};
         }
 
-        return data;
+        const now = Date.now();
+        let changed = false;
+
+        const result = {};
+
+        for (const index in data) {
+
+            const item = data[index];
+
+            if (
+                !item ||
+                typeof item !== "object"
+            ) {
+                delete data[index];
+                changed = true;
+                continue;
+            }
+
+            if (
+                now - item.updatedAt >
+                ONLINE_TIME
+            ) {
+                delete data[index];
+                changed = true;
+                continue;
+            }
+
+            result[index] = item.value;
+        }
+
+        if (changed) {
+            await this.ctx.storage.put(
+                "data",
+                data
+            );
+        }
+
+        return result;
     }
 
 
     async clear(index) {
 
-        let data = await this.ctx.storage.get("data");
+        let data =
+            await this.ctx.storage.get("data");
 
-        if (!data || typeof data !== "object") {
+        if (
+            !data ||
+            typeof data !== "object"
+        ) {
             return {};
         }
 
         delete data[index];
 
-        await this.ctx.storage.put("data", data);
+        await this.ctx.storage.put(
+            "data",
+            data
+        );
 
         return data;
     }
@@ -68,7 +161,9 @@ export class CloudData extends DurableObject {
 
     async delete() {
 
-        await this.ctx.storage.delete("data");
+        await this.ctx.storage.delete(
+            "data"
+        );
 
         return {};
     }
@@ -79,31 +174,38 @@ export default {
 
     async fetch(request, env) {
 
-        const url = new URL(request.url);
+        const url =
+            new URL(request.url);
 
 
         if (request.method === "OPTIONS") {
 
-            return new Response(null, {
-                status: 204,
-                headers: CORS_HEADERS
-            });
+            return new Response(
+                null,
+                {
+                    status: 204,
+                    headers: CORS_HEADERS
+                }
+            );
 
         }
 
 
-        // データ送信
         if (
             request.method === "POST" &&
             url.pathname === "/send"
         ) {
 
-            const body = await request.json();
+            const body =
+                await request.json();
 
-            const link = String(body.link);
+            const link =
+                String(body.link);
 
             const object =
-                env.CLOUD_DATA.getByName(link);
+                env.CLOUD_DATA.getByName(
+                    link
+                );
 
             return cors(
                 Response.json(
@@ -116,58 +218,103 @@ export default {
         }
 
 
-        // データ取得
         if (
             request.method === "GET" &&
             url.pathname === "/get"
         ) {
 
             const link =
-                String(url.searchParams.get("link"));
+                String(
+                    url.searchParams.get(
+                        "link"
+                    )
+                );
+
+            const index =
+                url.searchParams.get(
+                    "index"
+                );
 
             const object =
-                env.CLOUD_DATA.getByName(link);
+                env.CLOUD_DATA.getByName(
+                    link
+                );
 
             return cors(
                 Response.json(
-                    await object.get()
+                    await object.get(index)
                 )
             );
         }
 
 
-        // 特定の値を削除
+        if (
+            request.method === "GET" &&
+            url.pathname === "/getAll"
+        ) {
+
+            const link =
+                String(
+                    url.searchParams.get(
+                        "link"
+                    )
+                );
+
+            const object =
+                env.CLOUD_DATA.getByName(
+                    link
+                );
+
+            return cors(
+                Response.json(
+                    await object.getAll()
+                )
+            );
+        }
+
+
         if (
             request.method === "POST" &&
             url.pathname === "/clear"
         ) {
 
-            const body = await request.json();
+            const body =
+                await request.json();
 
-            const link = String(body.link);
+            const link =
+                String(body.link);
 
             const object =
-                env.CLOUD_DATA.getByName(link);
+                env.CLOUD_DATA.getByName(
+                    link
+                );
 
             return cors(
                 Response.json(
-                    await object.clear(body.index)
+                    await object.clear(
+                        body.index
+                    )
                 )
             );
         }
 
 
-        // サーバー全体を削除
         if (
             request.method === "DELETE" &&
             url.pathname === "/delete"
         ) {
 
             const link =
-                String(url.searchParams.get("link"));
+                String(
+                    url.searchParams.get(
+                        "link"
+                    )
+                );
 
             const object =
-                env.CLOUD_DATA.getByName(link);
+                env.CLOUD_DATA.getByName(
+                    link
+                );
 
             return cors(
                 Response.json(
@@ -178,7 +325,9 @@ export default {
 
 
         return cors(
-            new Response("Cloud Server OK")
+            new Response(
+                "Cloud Server OK"
+            )
         );
     }
 };
