@@ -5,7 +5,9 @@ export default {
         const url = new URL(request.url);
         const path = url.pathname;
 
+        // =========================
         // CORS
+        // =========================
         const headers = {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
@@ -13,7 +15,9 @@ export default {
             "Access-Control-Allow-Headers": "Content-Type"
         };
 
+        // =========================
         // OPTIONS
+        // =========================
         if (request.method === "OPTIONS") {
             return new Response(null, {
                 status: 204,
@@ -38,7 +42,7 @@ export default {
                 DATA[link] = {};
             }
 
-            // 指定位置に保存
+            // 指定したindexに値を保存
             DATA[link][index] = value;
 
             return new Response(
@@ -49,6 +53,7 @@ export default {
                     value: value
                 }),
                 {
+                    status: 200,
                     headers
                 }
             );
@@ -70,15 +75,33 @@ export default {
                 return new Response(
                     JSON.stringify(data),
                     {
+                        status: 200,
                         headers
                     }
                 );
             }
 
-            // link指定なし → 全データ
+            // link指定なし
+            // → 全データ
             return new Response(
                 JSON.stringify(DATA),
                 {
+                    status: 200,
+                    headers
+                }
+            );
+        }
+
+
+        // =========================
+        // GET ALL
+        // =========================
+        if (path === "/getAll" && request.method === "GET") {
+
+            return new Response(
+                JSON.stringify(DATA),
+                {
+                    status: 200,
                     headers
                 }
             );
@@ -92,7 +115,9 @@ export default {
 
             const link = url.searchParams.get("link");
 
+            // linkが指定されていない
             if (link === null) {
+
                 return new Response(
                     JSON.stringify({
                         error: "link is required"
@@ -104,6 +129,7 @@ export default {
                 );
             }
 
+            // 指定したlinkを削除
             delete DATA[String(link)];
 
             return new Response(
@@ -112,6 +138,7 @@ export default {
                     link: String(link)
                 }),
                 {
+                    status: 200,
                     headers
                 }
             );
