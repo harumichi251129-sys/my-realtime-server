@@ -13,9 +13,7 @@ export default {
             "Access-Control-Allow-Headers": "Content-Type"
         };
 
-        // =========================
         // CORS
-        // =========================
         if (request.method === "OPTIONS") {
             return new Response(null, {
                 status: 204,
@@ -88,7 +86,6 @@ export default {
                 );
             }
 
-            // linkもallもない場合
             return new Response(
                 JSON.stringify({}),
                 {
@@ -109,6 +106,7 @@ export default {
 
                 return new Response(
                     JSON.stringify({
+                        success: false,
                         error: "link is required"
                     }),
                     {
@@ -118,12 +116,21 @@ export default {
                 );
             }
 
-            delete DATA[String(link)];
+            const key = String(link);
+
+            // 削除前に存在確認
+            const existed = Object.prototype.hasOwnProperty.call(
+                DATA,
+                key
+            );
+
+            delete DATA[key];
 
             return new Response(
                 JSON.stringify({
                     success: true,
-                    link: String(link)
+                    link: key,
+                    deleted: existed
                 }),
                 {
                     status: 200,
@@ -137,6 +144,7 @@ export default {
         // =========================
         return new Response(
             JSON.stringify({
+                success: false,
                 error: "Not Found"
             }),
             {
