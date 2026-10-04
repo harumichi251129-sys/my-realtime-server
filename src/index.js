@@ -2,6 +2,7 @@ const DATA = {};
 
 export default {
     async fetch(request) {
+
         const url = new URL(request.url);
         const path = url.pathname;
 
@@ -12,6 +13,7 @@ export default {
             "Access-Control-Allow-Headers": "Content-Type"
         };
 
+        // CORS
         if (request.method === "OPTIONS") {
             return new Response(null, {
                 status: 204,
@@ -39,9 +41,9 @@ export default {
             return new Response(
                 JSON.stringify({
                     success: true,
-                    link,
-                    index,
-                    value
+                    link: link,
+                    index: index,
+                    value: value
                 }),
                 {
                     status: 200,
@@ -57,10 +59,13 @@ export default {
 
             const link = url.searchParams.get("link");
 
+            // link指定あり
             if (link !== null) {
 
                 return new Response(
-                    JSON.stringify(DATA[String(link)] || {}),
+                    JSON.stringify(
+                        DATA[String(link)] || {}
+                    ),
                     {
                         status: 200,
                         headers
@@ -68,20 +73,7 @@ export default {
                 );
             }
 
-            return new Response(
-                JSON.stringify(DATA),
-                {
-                    status: 200,
-                    headers
-                }
-            );
-        }
-
-        // =========================
-        // GET ALL
-        // =========================
-        if (path === "/getAll" && request.method === "GET") {
-
+            // link指定なし → 全データ
             return new Response(
                 JSON.stringify(DATA),
                 {
@@ -99,6 +91,7 @@ export default {
             const link = url.searchParams.get("link");
 
             if (link === null) {
+
                 return new Response(
                     JSON.stringify({
                         error: "link is required"
@@ -115,7 +108,7 @@ export default {
             return new Response(
                 JSON.stringify({
                     success: true,
-                    link
+                    link: String(link)
                 }),
                 {
                     status: 200,
