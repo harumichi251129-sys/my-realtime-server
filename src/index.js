@@ -1,202 +1,134 @@
-import { DurableObject } from "cloudflare:workers";
-
-const CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
-};
-
-function cors(response) {
-    const headers = new Headers(response.headers);
-
-    for (const [key, value] of Object.entries(CORS_HEADERS)) {
-        headers.set(key, value);
-    }
-
-    return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers
-    });
-}
-
-
-export class CloudData extends DurableObject {
-
-    async send(value, index) {
-
-        let data = await this.ctx.storage.get("data");
-
-        if (!data || typeof data !== "object") {
-            data = {};
-        }
-
-        data[index] = value;
-
-        await this.ctx.storage.put("data", data);
-
-        return data;
-    }
-
-
-    async get() {
-
-        const data = await this.ctx.storage.get("data");
-
-        if (!data || typeof data !== "object") {
-            return {};
-        }
-
-        return data;
-    }
-
-
-    async delete() {
-
-        await this.ctx.storage.delete("data");
-
-        return {};
-    }
-}
-
+const DATA = {};
 
 export default {
-
-    async fetch(request, env) {
-
+    async fetch(request) {
         const url = new URL(request.url);
+        const path = url.pathname;
 
+        // CORS
+        const headers = {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type"
+        };
 
-        /*
-         * CORS
-         */
-
+        // OPTIONS
         if (request.method === "OPTIONS") {
-
             return new Response(null, {
                 status: 204,
-                headers: CORS_HEADERS
+                headers
             });
-
         }
 
 
-        /*
-         * 送信
-         */
-
-        if (
-            request.method === "POST" &&
-            url.pathname === "/send"
-        ) {
+        // =========================
+        // SEND
+        // =========================
+        if (path === "/send" && request.method === "POST") {
 
             const body = await request.json();
 
+            const value = body.value;
+            const index = String(body.index);
             const link = String(body.link);
 
-            const object =
-                env.CLOUD_DATA.getByName(link);
+            // linkが存在しなければ作成
+            if (!DATA[link]) {
+                DATA[link] = {};
+            }
 
-            return cors(
-                Response.json(
-                    await object.send(
-                        body.value,
-                        body.index
-                    )
-                )
+            // 指定位置に保存
+            DATA[link][index] = value;
+
+            return new Response(
+                JSON.stringify({
+                    success: true,
+                    link: link,
+                    index: index,
+                    value: value
+                }),
+                {
+                    headers
+                }
             );
         }
 
 
-        /*
-         * 取得
-         */
+        // =========================
+        // GET
+        // =========================
+        if (path === "/get" && request.method === "GET") {
 
-        if (
-            request.method === "GET" &&
-            url.pathname === "/get"
-        ) {
+            const link = url.searchParams.get("link");
 
-            const link =
-                String(
-                    url.searchParams.get("link")
-                );
+            // link指定あり
+            if (link !== null) {
 
-            const object =
-                env.CLOUD_DATA.getByName(link);
+                const data = DATA[String(link)] || {};
 
-            return cors(
-                Response.json(
-                    await object.get()
-                )
-            );
-        }
-
-
-        /*
-         * 削除
-         */
-
-        if (
-            request.method === "DELETE" &&
-            url.pathname === "/delete"
-        ) {
-
-            const link =
-                String(
-                    url.searchParams.get("link")
-                );
-
-            const object =
-                env.CLOUD_DATA.getByName(link);
-
-            return cors(
-                Response.json(
-                    await object.delete()
-                )
-            );
-        }
-
-
-        /*
-         * WebSocket監視
-         */
-
-        if (
-            request.method === "GET" &&
-            url.pathname === "/watch"
-        ) {
-
-            if (
-                request.headers.get("Upgrade")
-                !== "websocket"
-            ) {
-
-                return cors(
-                    new Response(
-                        "WebSocket Required",
-                        {
-                            status: 426
-                        }
-                    )
+                return new Response(
+                    JSON.stringify(data),
+                    {
+                        headers
+                    }
                 );
             }
 
-
-            const link =
-                String(
-                    url.searchParams.get("link")
-                );
-
-            const object =
-                env.CLOUD_DATA.getByName(link);
-
-            return object.fetch(request);
+            // link指定なし → 全データ
+            return new Response(
+                JSON.stringify(DATA),
+                {
+                    headers
+                }
+            );
         }
 
 
-        return cors(
-            new Response("Cloud Server OK")
+        // =========================
+        // DELETE
+        // =========================
+        if (path === "/delete" && request.method === "DELETE") {
+
+            const link = url.searchParams.get("link");
+
+            if (link === null) {
+                return new Response(
+                    JSON.stringify({
+                        error: "link is required"
+                    }),
+                    {
+                        status: 400,
+                        headers
+                    }
+                );
+            }
+
+            delete DATA[String(link)];
+
+            return new Response(
+                JSON.stringify({
+                    success: true,
+                    link: String(link)
+                }),
+                {
+                    headers
+                }
+            );
+        }
+
+
+        // =========================
+        // NOT FOUND
+        // =========================
+        return new Response(
+            JSON.stringify({
+                error: "Not Found"
+            }),
+            {
+                status: 404,
+                headers
+            }
         );
     }
 };
