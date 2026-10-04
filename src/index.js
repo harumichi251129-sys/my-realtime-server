@@ -1,156 +1,203 @@
-const DATA = {};
+import { DurableObject } from "cloudflare:workers";
 
-export default {
+const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+};
+
+function cors(response) {
+    const headers = new Headers(response.headers);
+
+    for (const [key, value] of Object.entries(CORS_HEADERS)) {
+        headers.set(key, value);
+    }
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+    });
+}
+
+export class CloudData extends DurableObject {
+
+    async send(value, index) {
+        let data = await this.ctx.storage.get("data");
+
+        if (!data || typeof data !== "object") {
+            data = {};
+        }
+
+        data[index] = value;
+
+        await this.ctx.storage.put("data", data);
+
+        const message = JSON.stringify({
+            type: "update",
+            data: data
+        });
+
+        for (const socket of this.ctx.getWebSockets()) {
+            if (socket.readyState === WebSocket.OPEN) {
+                try {
+                    socket.send(message);
+                } catch {}
+            }
+        }
+
+        return data;
+    }
+
+    async get() {
+        const data = await this.ctx.storage.get("data");
+
+        if (!data || typeof data !== "object") {
+            return {};
+        }
+
+        return data;
+    }
+
+    async delete() {
+        await this.ctx.storage.delete("data");
+
+        const message = JSON.stringify({
+            type: "delete",
+            data: {}
+        });
+
+        for (const socket of this.ctx.getWebSockets()) {
+            if (socket.readyState === WebSocket.OPEN) {
+                try {
+                    socket.send(message);
+                } catch {}
+            }
+        }
+
+        return {};
+    }
+
     async fetch(request) {
-
-        const url = new URL(request.url);
-        const path = url.pathname;
-
-        const headers = {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type"
-        };
-
-        // CORS
-        if (request.method === "OPTIONS") {
-            return new Response(null, {
-                status: 204,
-                headers
+        if (request.headers.get("Upgrade") !== "websocket") {
+            return new Response("WebSocket Required", {
+                status: 426
             });
         }
 
-        // =========================
-        // SEND
-        // =========================
-        if (path === "/send" && request.method === "POST") {
+        const pair = new WebSocketPair();
+        const [client, server] = Object.values(pair);
 
+        this.ctx.acceptWebSocket(server);
+
+        return new Response(null, {
+            status: 101,
+            webSocket: client
+        });
+    }
+
+    async webSocketMessage(ws, message) {
+    }
+
+    async webSocketClose(ws, code, reason, wasClean) {
+        try {
+            ws.close(code, reason);
+        } catch {}
+    }
+
+    async webSocketError(ws, error) {
+        console.error("WebSocket error:", error);
+    }
+}
+
+export default {
+    async fetch(request, env) {
+        const url = new URL(request.url);
+
+        if (request.method === "OPTIONS") {
+            return new Response(null, {
+                status: 204,
+                headers: CORS_HEADERS
+            });
+        }
+
+        if (
+            request.method === "POST" &&
+            url.pathname === "/send"
+        ) {
             const body = await request.json();
-
-            const value = body.value;
-            const index = String(body.index);
             const link = String(body.link);
+            const object = env.CLOUD_DATA.getByName(link);
 
-            if (!DATA[link]) {
-                DATA[link] = {};
-            }
-
-            DATA[link][index] = value;
-
-            return new Response(
-                JSON.stringify({
-                    success: true,
-                    link: link,
-                    index: index,
-                    value: value
-                }),
-                {
-                    status: 200,
-                    headers
-                }
+            return cors(
+                Response.json(
+                    await object.send(
+                        body.value,
+                        body.index
+                    )
+                )
             );
         }
 
-        // =========================
-        // GET
-        // =========================
-        if (path === "/get" && request.method === "GET") {
+        if (
+            request.method === "GET" &&
+            url.pathname === "/get"
+        ) {
+            const link = String(
+                url.searchParams.get("link")
+            );
 
-            const all = url.searchParams.get("all");
-            const link = url.searchParams.get("link");
+            const object = env.CLOUD_DATA.getByName(link);
 
-            // 全データ
-            if (all === "true") {
-
-                return new Response(
-                    JSON.stringify(DATA),
-                    {
-                        status: 200,
-                        headers
-                    }
-                );
-            }
-
-            // 特定のアドレス
-            if (link !== null) {
-
-                return new Response(
-                    JSON.stringify(
-                        DATA[String(link)] || {}
-                    ),
-                    {
-                        status: 200,
-                        headers
-                    }
-                );
-            }
-
-            return new Response(
-                JSON.stringify({}),
-                {
-                    status: 200,
-                    headers
-                }
+            return cors(
+                Response.json(
+                    await object.get()
+                )
             );
         }
 
-        // =========================
-        // DELETE
-        // =========================
-        if (path === "/delete" && request.method === "DELETE") {
-
-            const link = url.searchParams.get("link");
-
-            if (link === null) {
-
-                return new Response(
-                    JSON.stringify({
-                        success: false,
-                        error: "link is required"
-                    }),
-                    {
-                        status: 400,
-                        headers
-                    }
-                );
-            }
-
-            const key = String(link);
-
-            // 削除前に存在確認
-            const existed = Object.prototype.hasOwnProperty.call(
-                DATA,
-                key
+        if (
+            request.method === "DELETE" &&
+            url.pathname === "/delete"
+        ) {
+            const link = String(
+                url.searchParams.get("link")
             );
 
-            delete DATA[key];
+            const object = env.CLOUD_DATA.getByName(link);
 
-            return new Response(
-                JSON.stringify({
-                    success: true,
-                    link: key,
-                    deleted: existed
-                }),
-                {
-                    status: 200,
-                    headers
-                }
+            return cors(
+                Response.json(
+                    await object.delete()
+                )
             );
         }
 
-        // =========================
-        // NOT FOUND
-        // =========================
-        return new Response(
-            JSON.stringify({
-                success: false,
-                error: "Not Found"
-            }),
-            {
-                status: 404,
-                headers
+        if (
+            request.method === "GET" &&
+            url.pathname === "/watch"
+        ) {
+            if (
+                request.headers.get("Upgrade") !== "websocket"
+            ) {
+                return cors(
+                    new Response("WebSocket Required", {
+                        status: 426
+                    })
+                );
             }
+
+            const link = String(
+                url.searchParams.get("link")
+            );
+
+            const object = env.CLOUD_DATA.getByName(link);
+
+            return object.fetch(request);
+        }
+
+        return cors(
+            new Response("Cloud Server OK")
         );
     }
 };
