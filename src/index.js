@@ -32,12 +32,12 @@ export class CloudData extends DurableObject {
         }
 
         data[index] = value;
-
         await this.ctx.storage.put("data", data);
 
+        // 変更されたプレイヤーの情報だけを配信
         const message = JSON.stringify({
             type: "update",
-            data
+            data: { [index]: value }
         });
 
         for (const socket of this.ctx.getWebSockets()) {
@@ -80,7 +80,6 @@ export class CloudData extends DurableObject {
         return {};
     }
 
-    // 全アドレス管理用
     async register(link, data) {
         let all = await this.ctx.storage.get("all");
 
@@ -89,7 +88,6 @@ export class CloudData extends DurableObject {
         }
 
         all[link] = data;
-
         await this.ctx.storage.put("all", all);
 
         return all;
@@ -103,7 +101,6 @@ export class CloudData extends DurableObject {
         }
 
         delete all[link];
-
         await this.ctx.storage.put("all", all);
 
         return all;
@@ -121,9 +118,7 @@ export class CloudData extends DurableObject {
 
     async fetch(request) {
         if (request.headers.get("Upgrade") !== "websocket") {
-            return new Response("WebSocket Required", {
-                status: 426
-            });
+            return new Response("WebSocket Required", { status: 426 });
         }
 
         const pair = new WebSocketPair();
@@ -161,9 +156,17 @@ export default {
             });
         }
 
-        // データ送信
         if (request.method === "POST" && url.pathname === "/send") {
-            const body = await request.json();
+            let body;
+
+            try {
+                body = await request.json();
+            } catch {
+                return cors(Response.json(
+                    { error: "Invalid JSON" },
+                    { status: 400 }
+                ));
+            }
 
             if (body.link == null || body.index == null) {
                 return cors(Response.json(
@@ -190,14 +193,10 @@ export default {
             return cors(Response.json(data));
         }
 
-        // データ取得・全件取得
         if (request.method === "GET" && url.pathname === "/get") {
             if (url.searchParams.get("all") === "true") {
                 const registry = env.CLOUD_DATA.getByName(REGISTRY);
-
-                return cors(Response.json(
-                    await registry.getAll()
-                ));
+                return cors(Response.json(await registry.getAll()));
             }
 
             const link = url.searchParams.get("link");
@@ -211,12 +210,9 @@ export default {
 
             const object = env.CLOUD_DATA.getByName(String(link));
 
-            return cors(Response.json(
-                await object.get()
-            ));
+            return cors(Response.json(await object.get()));
         }
 
-        // データ削除
         if (request.method === "DELETE" && url.pathname === "/delete") {
             const link = url.searchParams.get("link");
 
@@ -243,7 +239,6 @@ export default {
             return cors(Response.json(data));
         }
 
-        // WebSocket監視
         if (request.method === "GET" && url.pathname === "/watch") {
             if (request.headers.get("Upgrade") !== "websocket") {
                 return cors(new Response("WebSocket Required", {
