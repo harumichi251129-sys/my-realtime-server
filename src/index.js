@@ -1,3 +1,4 @@
+
 import { DurableObject } from "cloudflare:workers";
 
 const CORS_HEADERS = {
@@ -5,6 +6,8 @@ const CORS_HEADERS = {
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type"
 };
+
+const REGISTRY = "__cloud_registry_v1__";
 
 function cors(response) {
     const headers = new Headers(response.headers);
@@ -21,11 +24,10 @@ function cors(response) {
 }
 
 export class CloudData extends DurableObject {
-
     async send(value, index) {
         let data = await this.ctx.storage.get("data");
 
-        if (!data || typeof data !== "object") {
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
             data = {};
         }
 
@@ -35,7 +37,7 @@ export class CloudData extends DurableObject {
 
         const message = JSON.stringify({
             type: "update",
-            data: data
+            data
         });
 
         for (const socket of this.ctx.getWebSockets()) {
@@ -52,7 +54,7 @@ export class CloudData extends DurableObject {
     async get() {
         const data = await this.ctx.storage.get("data");
 
-        if (!data || typeof data !== "object") {
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
             return {};
         }
 
@@ -78,6 +80,45 @@ export class CloudData extends DurableObject {
         return {};
     }
 
+    // 全アドレス管理用
+    async register(link, data) {
+        let all = await this.ctx.storage.get("all");
+
+        if (!all || typeof all !== "object" || Array.isArray(all)) {
+            all = {};
+        }
+
+        all[link] = data;
+
+        await this.ctx.storage.put("all", all);
+
+        return all;
+    }
+
+    async unregister(link) {
+        let all = await this.ctx.storage.get("all");
+
+        if (!all || typeof all !== "object" || Array.isArray(all)) {
+            all = {};
+        }
+
+        delete all[link];
+
+        await this.ctx.storage.put("all", all);
+
+        return all;
+    }
+
+    async getAll() {
+        const all = await this.ctx.storage.get("all");
+
+        if (!all || typeof all !== "object" || Array.isArray(all)) {
+            return {};
+        }
+
+        return all;
+    }
+
     async fetch(request) {
         if (request.headers.get("Upgrade") !== "websocket") {
             return new Response("WebSocket Required", {
@@ -96,10 +137,9 @@ export class CloudData extends DurableObject {
         });
     }
 
-    async webSocketMessage(ws, message) {
-    }
+    async webSocketMessage(ws, message) {}
 
-    async webSocketClose(ws, code, reason, wasClean) {
+    async webSocketClose(ws, code, reason) {
         try {
             ws.close(code, reason);
         } catch {}
@@ -121,83 +161,110 @@ export default {
             });
         }
 
-        if (
-            request.method === "POST" &&
-            url.pathname === "/send"
-        ) {
+        // データ送信
+        if (request.method === "POST" && url.pathname === "/send") {
             const body = await request.json();
-            const link = String(body.link);
-            const object = env.CLOUD_DATA.getByName(link);
 
-            return cors(
-                Response.json(
-                    await object.send(
-                        body.value,
-                        body.index
-                    )
-                )
-            );
-        }
-
-        if (
-            request.method === "GET" &&
-            url.pathname === "/get"
-        ) {
-            const link = String(
-                url.searchParams.get("link")
-            );
-
-            const object = env.CLOUD_DATA.getByName(link);
-
-            return cors(
-                Response.json(
-                    await object.get()
-                )
-            );
-        }
-
-        if (
-            request.method === "DELETE" &&
-            url.pathname === "/delete"
-        ) {
-            const link = String(
-                url.searchParams.get("link")
-            );
-
-            const object = env.CLOUD_DATA.getByName(link);
-
-            return cors(
-                Response.json(
-                    await object.delete()
-                )
-            );
-        }
-
-        if (
-            request.method === "GET" &&
-            url.pathname === "/watch"
-        ) {
-            if (
-                request.headers.get("Upgrade") !== "websocket"
-            ) {
-                return cors(
-                    new Response("WebSocket Required", {
-                        status: 426
-                    })
-                );
+            if (body.link == null || body.index == null) {
+                return cors(Response.json(
+                    { error: "link and index are required" },
+                    { status: 400 }
+                ));
             }
 
-            const link = String(
-                url.searchParams.get("link")
-            );
+            const link = String(body.link);
+
+            if (link === REGISTRY) {
+                return cors(Response.json(
+                    { error: "Reserved link" },
+                    { status: 400 }
+                ));
+            }
 
             const object = env.CLOUD_DATA.getByName(link);
+            const data = await object.send(body.value, body.index);
+
+            const registry = env.CLOUD_DATA.getByName(REGISTRY);
+            await registry.register(link, data);
+
+            return cors(Response.json(data));
+        }
+
+        // データ取得・全件取得
+        if (request.method === "GET" && url.pathname === "/get") {
+            if (url.searchParams.get("all") === "true") {
+                const registry = env.CLOUD_DATA.getByName(REGISTRY);
+
+                return cors(Response.json(
+                    await registry.getAll()
+                ));
+            }
+
+            const link = url.searchParams.get("link");
+
+            if (link == null) {
+                return cors(Response.json(
+                    { error: "link is required" },
+                    { status: 400 }
+                ));
+            }
+
+            const object = env.CLOUD_DATA.getByName(String(link));
+
+            return cors(Response.json(
+                await object.get()
+            ));
+        }
+
+        // データ削除
+        if (request.method === "DELETE" && url.pathname === "/delete") {
+            const link = url.searchParams.get("link");
+
+            if (link == null) {
+                return cors(Response.json(
+                    { error: "link is required" },
+                    { status: 400 }
+                ));
+            }
+
+            if (String(link) === REGISTRY) {
+                return cors(Response.json(
+                    { error: "Reserved link" },
+                    { status: 400 }
+                ));
+            }
+
+            const object = env.CLOUD_DATA.getByName(String(link));
+            const data = await object.delete();
+
+            const registry = env.CLOUD_DATA.getByName(REGISTRY);
+            await registry.unregister(String(link));
+
+            return cors(Response.json(data));
+        }
+
+        // WebSocket監視
+        if (request.method === "GET" && url.pathname === "/watch") {
+            if (request.headers.get("Upgrade") !== "websocket") {
+                return cors(new Response("WebSocket Required", {
+                    status: 426
+                }));
+            }
+
+            const link = url.searchParams.get("link");
+
+            if (link == null || String(link) === REGISTRY) {
+                return cors(Response.json(
+                    { error: "Invalid link" },
+                    { status: 400 }
+                ));
+            }
+
+            const object = env.CLOUD_DATA.getByName(String(link));
 
             return object.fetch(request);
         }
 
-        return cors(
-            new Response("Cloud Server OK")
-        );
+        return cors(new Response("Cloud Server OK"));
     }
 };
